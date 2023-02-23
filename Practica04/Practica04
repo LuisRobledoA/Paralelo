@@ -1,0 +1,104 @@
+
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+
+__global__ void sum_array_gpu(int* a, int* b, int* c, int* d, int size) {
+
+    int tid = threadIdx.z * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+    int offsetBlock = blockIdx.x * blockDim.x * blockDim.y * blockDim.z;
+    int offsetRow = blockIdx.y * blockDim.x * blockDim.y * blockDim.z * gridDim.x;
+
+    int offsetLayer = blockIdx.z * blockDim.x * blockDim.y * blockDim.z * gridDim.x * gridDim.y;
+    int gid = tid + offsetBlock + offsetRow + offsetLayer;
+
+    if (gid < size) {
+        d[gid] = a[gid] + b[gid] + c[gid];
+    }
+
+}
+
+void sum_array_cpu(int* a, int* b, int* c, int* d, int size) {
+    for (int i = 0; i < size; i++) {
+        d[i] = a[i] + b[i] + c[i];
+    }
+}
+
+int main() {
+   
+    const int size = 10000;
+    int* host_a, * host_b, * host_c, * host_d, * check;
+    int* dev_a, * dev_b, * dev_c, * dev_d;
+
+    host_a = (int*)malloc(size * sizeof(int));
+    host_b = (int*)malloc(size * sizeof(int));
+    host_c = (int*)malloc(size * sizeof(int));
+    host_d = (int*)malloc(size * sizeof(int));
+    check = (int*)malloc(size * sizeof(int));
+
+    cudaMalloc(&dev_a, size * sizeof(int));
+    cudaMalloc(&dev_b, size * sizeof(int));
+    cudaMalloc(&dev_c, size * sizeof(int));
+    cudaMalloc(&dev_d, size * sizeof(int));
+
+    for (int i = 0; i < size; i++) {
+        int r1 = (rand() % (256));
+        int r2 = (rand() % (256));
+        int r3 = (rand() % (256));
+
+        host_a[i] = r1;
+        host_b[i] = r2;
+        host_c[i] = r3;
+        host_d[i] = 0;
+    }
+
+    cudaMemcpy(dev_a, host_a, size * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_b, host_b, size * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_c, host_c, size * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(dev_d, host_d, size * sizeof(int), cudaMemcpyHostToDevice);
+
+    dim3 grid(5, 4, 4);
+    dim3 block(8, 4, 4);
+
+    clock_t gpu_start, gpu_stop;
+
+    sum_array_cpu(host_a, host_b, host_c, host_d, size);
+    gpu_start = clock();
+    sum_array_gpu << <grid, block >> > (dev_a, dev_b, dev_c, dev_d, size);
+    cudaMemcpy(check, dev_d, size * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+    gpu_stop = clock();
+    cudaDeviceReset();
+
+    double cps_gpu = (double)((double)(gpu_stop - gpu_start) / CLOCKS_PER_SEC);
+    printf("Execution Time [ET-GPU]: %4.6f\n\r", cps_gpu);
+
+    bool ok = true;
+    for (int i = 0; i < size; i++) {
+        if (host_d[i] != check[i]) {
+            ok = false;
+        }
+    }
+
+
+    if (ok) {
+        printf("Equal\n");
+    }
+    else {
+        printf("Not Equal\n");
+    }
+    free(host_a);
+    free(host_b);
+    free(host_c);
+    free(check);
+    cudaFree(dev_a);
+    cudaFree(dev_b);
+    cudaFree(dev_c);
+
+
+    return 0;
+}
